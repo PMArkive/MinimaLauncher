@@ -10,7 +10,7 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  ****************************************************************************/
@@ -36,6 +36,7 @@
 #include "gameconfig_ssbb.h"
 #include "gameconfig_kirby.h"
 #include "patchcode.h"
+#include "settings.h"
 
 /* Boot Variables */
 u32 GameIOS = 0;
@@ -44,20 +45,21 @@ GXRModeObj *vmode = NULL;
 
 u32 AppEntrypoint = 0;
 
-extern "C" {
-extern void __exception_closeall();
+extern "C"
+{
+	extern void __exception_closeall();
 }
 
 int main()
 {
-	if ( (*(u32*)(0xCD8005A0) >> 16 ) == 0xCAFE ) // Wii U
+	if ((*(u32 *)(0xCD8005A0) >> 16) == 0xCAFE) // Wii U
 	{
 		/* vWii widescreen patch by tueidj */
 		write32(0xd8006a0, 0x30000004), mask32(0xd8006a8, 0, 2);
 	}
 
 	InitGecko();
-	gprintf("MinimaLauncher v1.2\n");
+	SYS_Report("MinimaLauncher v1.5\n");
 	VIDEO_Init();
 	WPAD_Init();
 	PAD_Init();
@@ -69,19 +71,19 @@ int main()
 	WDVD_Init();
 	u32 disc_check = 0;
 	WDVD_GetCoverStatus(&disc_check);
-	if(disc_check & 0x2)
+	if (disc_check & 0x2)
 	{
 		/* Open up Disc */
 		Disc_Open();
-		if(Disc_IsGC() == 0)
+		if (Disc_IsGC() == 0)
 		{
 			WII_Initialize();
-			gprintf("Booting GC Disc\n");
+			SYS_Report("Booting GC Disc\n");
 			/* Set Video Mode and Language */
-			u8 region = ((u8*)Disc_ID)[3];
-			u8 videoMode = 1; //PAL 576i
-			if(region == 'E' || region == 'J')
-				videoMode = 2; //NTSC 480i
+			u8 region = ((u8 *)Disc_ID)[3];
+			u8 videoMode = 1; // PAL 576i
+			if (region == 'E' || region == 'J')
+				videoMode = 2; // NTSC 480i
 			GC_SetVideoMode(videoMode);
 			GC_SetLanguage();
 			/* if DM is installed */
@@ -90,73 +92,65 @@ int main()
 			/* Set time */
 			Disc_SetTime();
 			/* NTSC-J Patch by FIX94 */
-			if(region == 'J')
+			if (region == 'J')
 				*HW_PPCSPEED = 0x0002A9E0;
 			/* Boot BC */
 			WII_LaunchTitle(GC_BC);
 		}
-		else if(Disc_IsWii() == 0)
+		else if (Disc_IsWii() == 0)
 		{
 			FILE *f = NULL;
 			size_t fsize = 0;
 			/* read in cheats */
-			WDVD_ReadDiskId((u8*)Disc_ID);
+			WDVD_ReadDiskId((u8 *)Disc_ID);
 			const DISC_INTERFACE *sd = &__io_wiisd;
 			sd->startup();
-			if(sd->isInserted())
-				gprintf("sd inserted!\n");
+			if (sd->isInserted())
+				SYS_Report("sd inserted!\n");
 			fatMountSimple("sd", sd);
+
+			/* settings */
+
+			// TODO: Optional support for loading & saving settings from app folder
+			// NOTE: If the config file is not found, the default settings will be used
+			struct stat st;
+			int exists = stat("sd:/minima.txt", &st);
+			if (exists == 0)
+			{
+				AppConfig.LoadSettings("sd:/minima.txt");
+			}
+
 			/* gameconfig */
-			if((*(u32*)Disc_ID & 0xFFFFFF00) == 0x52534200)//rsb?01 brawl
-				app_gameconfig_load((char*)Disc_ID, (u8*)gameconfig_ssbb, gameconfig_ssbb_size);
-			else if(*(u32*)Disc_ID == 0x53554B45)//suke01 kirby
-				app_gameconfig_load((char*)Disc_ID, (u8*)gameconfig_kirby, gameconfig_kirby_size);			
-			else
+			char configpath[255];
+			sprintf(configpath, "sd:/%s", AppConfig.ConfigPath);
+			f = fopen(configpath, "rb");
+			if (f != NULL)
 			{
-				f = fopen("sd:/gameconfig.txt", "rb");
-				if(f != NULL)
-				{
-					fseek(f, 0, SEEK_END);
-					fsize = ftell(f);
-					rewind(f);
-					u8 *gameconfig = (u8*)malloc(fsize);
-					fread(gameconfig, fsize, 1, f);
-					fclose(f);
-					app_gameconfig_load((char*)Disc_ID, gameconfig, fsize);
-					free(gameconfig);
-				}
-			}
-			/* gct */
-			char gamepath[22];
-			if((*(u32*)Disc_ID & 0xFFFFFF00) == 0x52534200)//rsb?01 brawl
-			{
-				PAD_ScanPads();
-				u32 pad_down = PAD_ButtonsDown(0) | PAD_ButtonsDown(1) | PAD_ButtonsDown(2) | PAD_ButtonsDown(3);
-				WPAD_ScanPads();
-				u32 wpad_down = WPAD_ButtonsDown(0) | WPAD_ButtonsDown(1) | WPAD_ButtonsDown(2) | WPAD_ButtonsDown(3);
-				if ((wpad_down & WPAD_BUTTON_LEFT) || (pad_down & PAD_BUTTON_LEFT))
-					sprintf(gamepath, "sd:/codes/ProjectM.gct");
-				else if ((wpad_down & WPAD_BUTTON_RIGHT) || (pad_down & PAD_BUTTON_RIGHT))
-					sprintf(gamepath, "sd:/codes/Minus.gct");
-				else
-					sprintf(gamepath, "sd:/codes/%.6s.gct", (char*)Disc_ID);
-			}
-			else
-			{
-				sprintf(gamepath, "sd:/codes/%.6s.gct", (char*)Disc_ID);
-			}
-			gprintf("%s\n", gamepath);
-			f = fopen(gamepath, "rb");
-			if(f != NULL)
-			{
-				gprintf("Opened gct\n");
 				fseek(f, 0, SEEK_END);
 				fsize = ftell(f);
 				rewind(f);
-				u8 *cheats = (u8*)malloc(fsize);
+				u8 *gameconfig = (u8 *)malloc(fsize);
+				fread(gameconfig, fsize, 1, f);
+				fclose(f);
+				app_gameconfig_load((char *)Disc_ID, gameconfig, fsize);
+				free(gameconfig);
+			}
+
+			/* gct */
+			char gamepath[255];
+			sprintf(gamepath, "sd:/%s/%.6s.gct", AppConfig.CheatFolder, (char *)Disc_ID);
+			SYS_Report("%s\n", gamepath);
+			f = fopen(gamepath, "rb");
+			if (f != NULL)
+			{
+				SYS_Report("Opened gct\n");
+				fseek(f, 0, SEEK_END);
+				fsize = ftell(f);
+				rewind(f);
+				u8 *cheats = (u8 *)malloc(fsize);
 				fread(cheats, fsize, 1, f);
 				fclose(f);
-				ocarina_set_codes((void*)0x800022A8, (u8*)0x80003000, cheats, fsize);
+				ocarina_set_codes((void *)0x800022A8, (u8 *)0x80003000, cheats, fsize);
 				free(cheats);
 			}
 			fatUnmount("sd");
@@ -165,19 +159,22 @@ int main()
 			u32 offset = 0;
 			Disc_FindPartition(&offset);
 			WDVD_OpenPartition(offset, &GameIOS);
-			gprintf("Using IOS: %i\n", GameIOS);
 			WDVD_Close();
-			if((*(u32*)Disc_ID & 0xFFFFFF00) == 0x52534200)
-				IOS_ReloadIOS(58); //for SDHC support
-			else
-				IOS_ReloadIOS(GameIOS); //supports all other games
+
+			/* Reload IOS if config specifies an override */
+			if (AppConfig.IOS != -1)
+				GameIOS = AppConfig.IOS;
+
+			SYS_Report("Using IOS: %i\n", GameIOS);
+			IOS_ReloadIOS(GameIOS);
+
 			/* Re-Init after IOS Reload */
 			WDVD_Init();
-			WDVD_ReadDiskId((u8*)Disc_ID);
+			WDVD_ReadDiskId((u8 *)Disc_ID);
 			WDVD_OpenPartition(offset, &GameIOS);
 			/* Run Apploader */
 			AppEntrypoint = Apploader_Run();
-			gprintf("Entrypoint: %08x\n", AppEntrypoint);
+			SYS_Report("Entrypoint: %08x\n", AppEntrypoint);
 			WDVD_Close();
 			/* Setup Low Memory */
 			Disc_SetLowMem(GameIOS);
@@ -191,20 +188,20 @@ int main()
 			__IOS_ShutdownSubsystems();
 			__exception_closeall();
 			/* Originally from tueidj - taken from NeoGamma (thx) */
-			*(vu32*)0xCC003024 = 1;
+			*(vu32 *)0xCC003024 = 1;
 			/* Boot */
-			if(hooktype == 0)				
+			if (hooktype == 0)
 			{
-				asm volatile (
+				asm volatile(
 					"lis %r3, AppEntrypoint@h\n"
 					"ori %r3, %r3, AppEntrypoint@l\n"
 					"lwz %r3, 0(%r3)\n"
 					"mtlr %r3\n"
-					"blr\n"
-				);
+					"blr\n");
 			}
-			else{
-				asm volatile (
+			else
+			{
+				asm volatile(
 					"lis %r3, AppEntrypoint@h\n"
 					"ori %r3, %r3, AppEntrypoint@l\n"
 					"lwz %r3, 0(%r3)\n"
@@ -212,8 +209,7 @@ int main()
 					"lis %r3, 0x8000\n"
 					"ori %r3, %r3, 0x18A8\n"
 					"mtctr %r3\n"
-					"bctr\n"
-				);
+					"bctr\n");
 			}
 			/* Fail */
 			IRQ_Restore(level);
