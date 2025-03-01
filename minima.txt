@@ -1,0 +1,8 @@
+// This is an example config file for configuring certain MinimaLauncher settings
+
+CheatFolder = /codes
+ConfigPath = /gameconfig.txt
+
+// IOS set to -1 is ignored and means to use the game's default IOS. 
+// Change the number below to override the game's IOS (for example, to use SDHC in brawl)
+IOS = -1
